@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  pdf-generator:
+    build: .
+    container_name: pdfme-generator
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./templates:/app/templates:ro
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
