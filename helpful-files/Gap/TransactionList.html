@@ -1,0 +1,78 @@
+﻿<section id="transaction-details">
+    <div>
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">
+                        Transaction Date
+                    </th>
+                    <th scope="col">
+                        Posting Date
+                    </th>
+                    <th scope="col">
+                        Transaction Details
+                    </th>
+                    <th scope="col">
+                        Debits(Kes)
+                    </th>
+                    <th scope="col">
+                        Credits(Kes)
+                    </th>
+                </tr>
+            </thead>
+            <tbody id="transaction-list">
+                ##TransactionRows##
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td></td>
+                    <td></td>
+                    <td class="totals">TOTALS FOR DEBITS/CREDITS :</td>
+                    <td><pre>##TotalDebits##</pre></td>
+                    <td><pre>##TotalCredits##</pre></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    <div id="card-details">
+        <div>
+            Top up or settle  your credit card account using Paybill no. 985050
+            <br>
+            Indicate your full card number (16 digits, no spaces) as the account.
+            <br>
+            Kindly address any queries councerning the balance or entries in this statement
+            <br>
+            with GAB withing 21 days from the  statement date.
+        </div>
+        <div>
+            <div>
+                <div>
+                    <span>Credit Limit</span>
+                    <span>##CreditLimit##</span>
+                </div>
+                <div>
+                    <span>Payment Date</span>
+                    <span>##PaymentDate##</span>
+                </div>
+                <div>
+                    <span>Arrears</span>
+                    <span>##Arrears##</span>
+                </div>
+            </div>
+            <div>
+                <div>
+                    <span>Current Balance</span>
+                    <span>##CurrentBalance##</span>
+                </div>
+                <div>
+                    <span>Minimum Due</span>
+                    <span>##MinimumDue##</span>
+                </div>
+                <div>
+                    <span>Days Past Due</span>
+                    <span>##DaysPastDue##</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
