@@ -4,11 +4,18 @@ A simple Node.js application that generates PDFs using the pdfme library. The se
 
 ## Features
 
+- **🎨 Visual Template Designer**: Built-in web-based designer for creating templates (no need for external tools!)
 - **REST API**: Simple POST endpoint at `/pdf`
-- **Template Selection**: Automatically selects templates based on `bank_name` field
+- **Template Selection**: Automatically selects templates based on `template_name` field
 - **Direct PDF Response**: Returns PDF directly without storage (like Gotenberg)
 - **Docker Support**: Fully containerized with volume-mounted templates
-- **Easy Template Management**: Add new templates by dropping JSON files in the templates directory
+- **Easy Template Management**: Create, edit, and save templates through the web designer or by editing JSON files
+
+## 🚀 Quick Access
+
+- **Template Designer**: http://localhost:3000/designer
+- **API Endpoint**: http://localhost:3000/pdf
+- **Health Check**: http://localhost:3000/health
 
 ## Project Structure
 

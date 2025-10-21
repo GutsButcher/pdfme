@@ -27,6 +27,7 @@ COPY --from=builder /app/node_modules ./node_modules
 
 # Copy application code
 COPY src ./src
+COPY public ./public
 
 # Create templates directory (will be mounted as volume)
 RUN mkdir -p /app/templates

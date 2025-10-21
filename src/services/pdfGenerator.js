@@ -1,4 +1,5 @@
 const { generate } = require('@pdfme/generator');
+const { text, image } = require('@pdfme/schemas');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -33,6 +34,20 @@ async function generatePDF(templateName, data) {
   // Load the template based on template name
   const template = await loadTemplate(templateName);
 
+  // Convert custom fonts from base64 strings to Buffers
+  if (template.fonts) {
+    const fonts = {};
+    for (const [fontName, fontData] of Object.entries(template.fonts)) {
+      // If font is a base64 string, convert to Buffer
+      if (typeof fontData === 'string') {
+        fonts[fontName] = Buffer.from(fontData, 'base64');
+      } else {
+        fonts[fontName] = fontData;
+      }
+    }
+    template.fonts = fonts;
+  }
+
   // Prepare inputs array - pdfme expects an array of objects
   // Each object represents data for one page
   const inputs = Array.isArray(data) ? data : [data];
@@ -42,6 +57,7 @@ async function generatePDF(templateName, data) {
     const pdf = await generate({
       template,
       inputs,
+      plugins: { text, image },
     });
 
     return Buffer.from(pdf);
