@@ -1,8 +1,52 @@
-version: '3.8'
-
 services:
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: pdfme-rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"    # AMQP port
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./RabbitMQ/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    networks:
+      - pdfme-network
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: pdfme-minio
+    hostname: minio
+    ports:
+      - "9000:9000"    # API port
+      - "9001:9001"    # Console UI
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - pdfme-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   pdf-generator:
-    build: .
+    build:
+      context: ./pdfme
+      dockerfile: Dockerfile
     container_name: pdfme-generator
     ports:
       - "3000:3000"
@@ -10,4 +54,82 @@ services:
       - ./templates:/app/templates:ro
     environment:
       - NODE_ENV=production
+      - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
+      - DEFAULT_BUCKET=pdfs
+    networks:
+      - pdfme-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
+
+  storage-service:
+    build:
+      context: ./storage-service
+      dockerfile: Dockerfile
+    container_name: pdfme-storage
+    environment:
+      - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
+      - QUEUE_NAME=storage_ready
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_USE_SSL=false
+    networks:
+      - pdfme-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  file-watcher:
+    build:
+      context: ./file-watcher
+      dockerfile: Dockerfile
+    container_name: pdfme-file-watcher
+    environment:
+      - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
+      - QUEUE_NAME=parse_ready
+      - BUCKET_NAME=uploads
+      - POLL_INTERVAL=10s
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_USE_SSL=false
+    networks:
+      - pdfme-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  parser-service:
+    build:
+      context: ./parser
+      dockerfile: Dockerfile
+    container_name: pdfme-parser
+    ports:
+      - "8080:8080"
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=admin
+      - RABBITMQ_PASSWORD=admin123
+    networks:
+      - pdfme-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  rabbitmq_data:
+  minio_data:
+
+networks:
+  pdfme-network:
+    driver: bridge
