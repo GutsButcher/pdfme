@@ -1,172 +1,186 @@
-# PDF Generator Service - User Manual
+# User Manual
+
+## System Overview
+
+Automated PDF generation pipeline using microservices and message queues.
 
 ## Quick Start
-
-### 1. Start the Service
 
 ```bash
 docker-compose up -d
 ```
 
-The service will be available at `http://localhost:3000`
+**Services**: RabbitMQ, MinIO, File Watcher, Parser, PDF Generator, Storage
 
----
+## Usage Methods
 
-## Creating Templates
+### Method 1: File Upload (Automated)
 
-### Step 1: Design Your Template
+1. **Access MinIO Console**: http://localhost:9001
+   - Username: `minioadmin`
+   - Password: `minioadmin`
 
-1. Go to **pdfme Playground**: https://pdfme.com/template-design
-2. Design your template using the visual editor:
-   - Add text fields, images, shapes, etc.
-   - Position and style elements as needed
-   - Define field names for dynamic data (e.g., `customer_name`, `invoice_number`)
-3. **Export the template** as JSON
+2. **Upload file** to `uploads` bucket
+   - Naming: `{orgId}_{filename}.txt`
+   - Example: `266_statement.txt`
 
-### Step 2: Save Template File
+3. **Wait ~10 seconds** for automatic processing
 
-1. Save the exported JSON in `./templates/` directory
-2. Name it descriptively (e.g., `invoice.json`, `bank_statement.json`, `contract.json`)
-3. The filename (without `.json`) will be your `template_name` in API requests
+4. **Download PDF** from `pdfs` bucket
+   - Filename: `{orgId}_{last4digits}_{random6}.pdf`
 
-**Example:**
+### Method 2: Test Script
+
 ```bash
-./templates/invoice.json          → template_name: "invoice"
-./templates/bank_statement.json   → template_name: "bank_statement"
+./test_upload_file.sh test_data/266003.txt 266
 ```
 
----
+### Method 3: HTTP API
 
-## Using the API
-
-### Endpoint
-
-**POST** `http://localhost:3000/pdf`
-
-### Request Format
-
-```json
-{
-  "template_name": "your_template_name",
-  "data": {
-    "field1": "value1",
-    "field2": "value2"
-  }
-}
+**Parser Format**:
+```bash
+curl -X POST http://localhost:3000/pdf/parser \
+  -H "Content-Type: application/json" \
+  -d @test_data/parser_test_5trans.json \
+  --output statement.pdf
 ```
 
-- **`template_name`**: Name of the template file (without `.json` extension)
-- **`data`**: Object with field names matching those in your template
-
-### Example Request
-
+**Direct Format**:
 ```bash
 curl -X POST http://localhost:3000/pdf \
   -H "Content-Type: application/json" \
   -d '{
-    "template_name": "invoice",
-    "data": {
-      "customer_name": "John Smith",
-      "invoice_number": "INV-2024-001",
-      "total_amount": "$1,500.00"
-    }
+    "template_name": "new-template",
+    "data": {...}
   }' \
-  --output invoice.pdf
+  --output document.pdf
 ```
 
-### Response
+### Method 4: RabbitMQ
 
-- **Success (200)**: PDF file returned directly
-- **Error (400)**: Missing `template_name` or `data`
-- **Error (500)**: Template not found or generation failed
-
----
-
-## Important Notes
-
-### Field Names Must Match
-
-The field names in your request `data` **must exactly match** the field names defined in your pdfme template.
-
-**Template defines:**
-```json
-"customer_name": { ... }
-"invoice_total": { ... }
+```bash
+npm install
+node test_producer.js parser_test_5trans.json
 ```
 
-**Request must use:**
-```json
-"data": {
-  "customer_name": "John Doe",
-  "invoice_total": "$500"
-}
+## File Naming Convention
+
+```
+{orgId}_{description}.{ext}
+
+Examples:
+  266_statement.txt
+  266_account_001.txt
 ```
 
-### Static vs Dynamic Content
+OrgId is extracted and used to select template.
 
-Use pdfme's `default` property for static content (logos, labels, headers):
+## Templates
 
-```json
-{
-  "company_logo": {
-    "type": "text",
-    "default": "ABC Corporation",
-    ...
-  }
-}
+### Active Templates
+
+- **266**: `new-template.json`
+
+### Adding New Template
+
+1. Design at https://pdfme.com/template-design
+2. Export as JSON
+3. Save to `./templates/{name}.json`
+4. Add mapping in `pdfme/src/config/orgTemplateMapping.js`:
+   ```javascript
+   '123': 'your-template'
+   ```
+5. Restart: `docker-compose restart pdf-generator`
+
+## Monitoring
+
+### MinIO Console
+http://localhost:9001
+
+**Buckets**:
+- `uploads` - Input files
+- `pdfs` - Generated PDFs
+
+### RabbitMQ Management
+http://localhost:15672 (admin / admin123)
+
+**Queues**:
+- `parse_ready` - Files to parse
+- `pdf_ready` - Data to generate
+- `storage_ready` - PDFs to store
+
+### Service Logs
+
+```bash
+docker-compose logs -f file-watcher
+docker-compose logs -f parser-service
+docker-compose logs -f pdf-generator
+docker-compose logs -f storage-service
 ```
 
-Static fields don't need to be in request data.
+## Service Endpoints
 
-### Multiple Pages
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
+| RabbitMQ Management | http://localhost:15672 | admin / admin123 |
+| PDF Generator API | http://localhost:3000 | - |
+| Parser API | http://localhost:8080 | - |
 
-To generate multi-page PDFs, send `data` as an array:
+## Troubleshooting
 
-```json
-{
-  "template_name": "invoice",
-  "data": [
-    { "customer_name": "Customer 1", ... },
-    { "customer_name": "Customer 2", ... }
-  ]
-}
+### File Not Processed
+
+Check each stage:
+```bash
+docker-compose logs file-watcher    # File detected?
+docker-compose logs parser-service  # Parsing successful?
+docker-compose logs pdf-generator   # PDF generated?
+docker-compose logs storage-service # Uploaded to MinIO?
 ```
 
-Each object creates one page.
+### Service Issues
 
-### No Container Restart Needed
+```bash
+docker-compose ps                      # Check status
+docker-compose restart <service-name>  # Restart service
+docker-compose logs <service-name>     # View logs
+```
 
-When you add/modify templates in `./templates/`, they're immediately available. No need to restart the container.
+### Reset System
 
----
+```bash
+docker-compose down -v
+docker-compose up -d --build
+```
 
-## Health Check
+## Advanced
+
+### Direct Queue Access
+
+Send messages directly to queues using `test_producer.js`
+
+### Scaling Services
+
+```bash
+docker-compose up -d --scale pdf-generator=3
+docker-compose up -d --scale storage-service=2
+```
+
+### Health Checks
 
 ```bash
 curl http://localhost:3000/health
 ```
-Returns: `{"status":"ok"}`
 
----
+## Technical Documentation
 
-## Example Workflow
-
-```bash
-# 1. Create template in pdfme playground
-# 2. Export and save as ./templates/receipt.json
-# 3. Generate PDF
-
-curl -X POST http://localhost:3000/pdf \
-  -H "Content-Type: application/json" \
-  -d '{
-    "template_name": "receipt",
-    "data": {
-      "date": "2024-01-15",
-      "item": "Coffee",
-      "price": "$4.50"
-    }
-  }' \
-  --output receipt.pdf
-
-# Done! receipt.pdf is generated
-```
+See `docs/` directory:
+- `file-watcher.md` - File watcher specs
+- `parser.md` - Parser specs
+- `pdfme.md` - PDF generator specs
+- `storage-service.md` - Storage specs
+- `message-flow.md` - Queue message formats
+- `template-mapping.md` - Field mapping rules
+- `api-reference.md` - HTTP API reference
+- `deployment.md` - Deployment guide
