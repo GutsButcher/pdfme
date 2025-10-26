@@ -1,8 +1,9 @@
 package types
 
-// FileMessage represents a file to be parsed
+// FileMessage represents a file to be processed
 type FileMessage struct {
+	JobID       string `json:"job_id"`        // UUID from database
+	FileHash    string `json:"file_hash"`     // S3 ETag (MD5)
 	Filename    string `json:"filename"`
-	FileContent string `json:"file_content"` // Base64 encoded file
-	OrgID       string `json:"org_id"`       // Optional: extracted from filename or metadata
+	FileContent string `json:"file_content"`  // base64 encoded
 }

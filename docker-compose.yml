@@ -56,7 +56,7 @@ services:
       POSTGRES_INITDB_ARGS: "-E UTF8"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./init-db-simplified.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     networks:
