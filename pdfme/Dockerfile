@@ -28,8 +28,8 @@ COPY --from=builder /app/node_modules ./node_modules
 # Copy application code
 COPY src ./src
 
-# Create templates directory (will be mounted as volume)
-RUN mkdir -p /app/templates
+# Copy templates into container
+COPY templates ./templates
 
 # Expose port
 EXPOSE 3000

@@ -50,8 +50,6 @@ services:
     container_name: pdfme-generator
     ports:
       - "3000:3000"
-    volumes:
-      - ./templates:/app/templates:ro
     environment:
       - NODE_ENV=production
       - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
