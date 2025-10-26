@@ -8,6 +8,10 @@ import java.util.List;
 
 public class EStatementRecord {
 
+    // Pass through fields (not parsed, just forwarded)
+    private String jobId;
+    private String fileHash;
+
     private String orgId;
     private String cardNumber;
     private String statementDate;
@@ -22,6 +26,22 @@ public class EStatementRecord {
 
     public EStatementRecord() {
         this.transactions = new ArrayList<>();
+    }
+
+    public String getJobId() {
+        return jobId;
+    }
+
+    public void setJobId(String jobId) {
+        this.jobId = jobId;
+    }
+
+    public String getFileHash() {
+        return fileHash;
+    }
+
+    public void setFileHash(String fileHash) {
+        this.fileHash = fileHash;
     }
 
 

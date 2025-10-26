@@ -26,8 +26,9 @@ public class RabbitMQConsumer {
     public void consumeFromParseReady(FileMessage message) {
         try {
             log.info("\n[→] Received message from parse_ready");
+            log.info("  Job ID: {}", message.getJobId());
+            log.info("  File Hash: {}", message.getFileHash());
             log.info("  Filename: {}", message.getFilename());
-            log.info("  OrgID: {}", message.getOrgId());
 
             // Decode base64 file content
             byte[] fileBytes = Base64.getDecoder().decode(message.getFileContent());
@@ -43,6 +44,10 @@ public class RabbitMQConsumer {
 
             // Clean up temp file
             Files.deleteIfExists(tempFile);
+
+            // Pass through job_id and file_hash (important for storage service!)
+            record.setJobId(message.getJobId());
+            record.setFileHash(message.getFileHash());
 
             log.info("✓ Parsed: orgId={}, name={}, transactions={}",
                 record.getOrgId(), record.getName(), record.getTransactions().size());

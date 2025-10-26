@@ -66,6 +66,17 @@ async function processPDFRequest(message) {
   try {
     const request = JSON.parse(message.content.toString());
 
+    // Extract pass-through fields (critical for storage service!)
+    const jobId = request.jobId || request.job_id;
+    const fileHash = request.fileHash || request.file_hash;
+
+    if (!jobId || !fileHash) {
+      throw new Error('job_id and file_hash are required fields');
+    }
+
+    console.log(`  Job ID: ${jobId.substring(0, 8)}...`);
+    console.log(`  File Hash: ${fileHash.substring(0, 12)}...`);
+
     let template_name, data, pagination, bucket_name, filename_prefix;
 
     // Check if this is parser format (has orgId field) or direct format
@@ -78,7 +89,7 @@ async function processPDFRequest(message) {
       data = transformed.data;
       pagination = transformed.pagination;
       bucket_name = request.bucket_name || DEFAULT_BUCKET;
-      filename_prefix = `${request.orgId}_${request.cardNumber?.slice(-4) || 'statement'}`;
+      filename_prefix = `statement_${request.orgId}`;
 
       console.log(`✓ Transformed to template: ${template_name}`);
     } else {
@@ -108,13 +119,15 @@ async function processPDFRequest(message) {
     const base64Content = pdfBuffer.toString('base64');
     console.log(`✓ Encoded to base64 (${base64Content.length} chars)`);
 
-    // Generate filename with random suffix
+    // Generate filename with timestamp
     const prefix = filename_prefix || template_name;
-    const randomSuffix = generateRandomSuffix();
-    const filename = `${prefix}_${randomSuffix}.pdf`;
+    const timestamp = Date.now();
+    const filename = `${prefix}_${timestamp}.pdf`;
 
-    // Prepare storage message
+    // Prepare storage message (MUST include job_id and file_hash!)
     const storageMessage = {
+      job_id: jobId,        // Pass through for DB update
+      file_hash: fileHash,  // Pass through for Redis update
       bucket_name: bucket_name || DEFAULT_BUCKET,
       filename: filename,
       file_content: base64Content
