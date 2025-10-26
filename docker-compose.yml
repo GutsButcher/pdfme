@@ -43,6 +43,56 @@ services:
       retries: 5
     restart: unless-stopped
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: pdfme-postgres
+    hostname: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: pdfme
+      POSTGRES_USER: pdfme
+      POSTGRES_PASSWORD: pdfme_secure_pass
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    networks:
+      - pdfme-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdfme -d pdfme"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pdfme-redis
+    hostname: redis
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    networks:
+      - pdfme-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   pdf-generator:
     build:
       context: ./pdfme
@@ -54,10 +104,23 @@ services:
       - NODE_ENV=production
       - RABBITMQ_URL=amqp://admin:admin123@rabbitmq:5672
       - DEFAULT_BUCKET=pdfs
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=pdfme
+      - POSTGRES_PASSWORD=pdfme_secure_pass
+      - POSTGRES_DB=pdfme
+      - POSTGRES_MAX_POOL_SIZE=20
+      - POSTGRES_MIN_POOL_SIZE=5
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     networks:
       - pdfme-network
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
@@ -73,12 +136,24 @@ services:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
       - MINIO_USE_SSL=false
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=pdfme
+      - POSTGRES_PASSWORD=pdfme_secure_pass
+      - POSTGRES_DB=pdfme
+      - POSTGRES_MAX_POOL_SIZE=10
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     networks:
       - pdfme-network
     depends_on:
       rabbitmq:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
@@ -96,12 +171,26 @@ services:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
       - MINIO_USE_SSL=false
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=pdfme
+      - POSTGRES_PASSWORD=pdfme_secure_pass
+      - POSTGRES_DB=pdfme
+      - POSTGRES_MAX_POOL_SIZE=10
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - BATCH_SIZE=100
+      - RATE_LIMIT_PER_SECOND=50
     networks:
       - pdfme-network
     depends_on:
       rabbitmq:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
@@ -117,16 +206,31 @@ services:
       - RABBITMQ_PORT=5672
       - RABBITMQ_USERNAME=admin
       - RABBITMQ_PASSWORD=admin123
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=pdfme
+      - POSTGRES_PASSWORD=pdfme_secure_pass
+      - POSTGRES_DB=pdfme
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE=15
+      - SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE=5
     networks:
       - pdfme-network
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
   rabbitmq_data:
   minio_data:
+  postgres_data:
+  redis_data:
 
 networks:
   pdfme-network:
