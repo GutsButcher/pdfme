@@ -2,120 +2,158 @@
 
 ## System Overview
 
-Automated PDF generation pipeline using microservices and message queues.
+Automated PDF generation pipeline with job state tracking and duplicate prevention.
+
+**Services**: RabbitMQ, MinIO, PostgreSQL, Redis, File Watcher, Parser, PDF Generator, Storage
 
 ## Quick Start
 
 ```bash
+# Start all services
 docker-compose up -d
+
+# Check service health
+docker-compose ps
 ```
 
-**Services**: RabbitMQ, MinIO, File Watcher, Parser, PDF Generator, Storage
+## File Upload & Processing
 
-## Usage Methods
+### Method 1: MinIO Console (Recommended)
 
-### Method 1: File Upload (Automated)
-
-1. **Access MinIO Console**: http://localhost:9001
+1. **Access**: http://localhost:9001
    - Username: `minioadmin`
    - Password: `minioadmin`
 
-2. **Upload file** to `uploads` bucket
-   - Naming: `{orgId}_{filename}.txt`
-   - Example: `266_statement.txt`
+2. **Upload** to `uploads` bucket
+   - Any filename (e.g., `266003.txt`, `statement_jan.txt`)
+   - System uses file hash, not name
 
-3. **Wait ~10 seconds** for automatic processing
+3. **Wait** ~10 seconds (file-watcher polls every 10s)
 
 4. **Download PDF** from `pdfs` bucket
-   - Filename: `{orgId}_{last4digits}_{random6}.pdf`
+   - Filename: `statement_{orgId}_{timestamp}.pdf`
 
-### Method 2: Test Script
+### Method 2: CLI Upload
 
 ```bash
-./test_upload_file.sh test_data/266003.txt 266
+# Using MinIO client in container
+docker-compose exec minio mc cp /path/to/file.txt local/uploads/
+
+# Or use script
+./test_upload_file.sh test_data/266003.txt
 ```
 
-### Method 3: HTTP API
+### Method 3: HTTP API (Direct PDF)
 
-**Parser Format**:
 ```bash
 curl -X POST http://localhost:3000/pdf/parser \
   -H "Content-Type: application/json" \
-  -d @test_data/parser_test_5trans.json \
+  -d @test_data/parser_test.json \
   --output statement.pdf
 ```
 
-**Direct Format**:
-```bash
-curl -X POST http://localhost:3000/pdf \
-  -H "Content-Type: application/json" \
-  -d '{
-    "template_name": "new-template",
-    "data": {...}
-  }' \
-  --output document.pdf
-```
-
-### Method 4: RabbitMQ
-
-```bash
-npm install
-node test_producer.js parser_test_5trans.json
-```
-
-## File Naming Convention
-
-```
-{orgId}_{description}.{ext}
-
-Examples:
-  266_statement.txt
-  266_account_001.txt
-```
-
-OrgId is extracted and used to select template.
-
-## Templates
-
-### Active Templates
-
-- **266**: `new-template.json`
-
-### Adding New Template
-
-1. Design at https://pdfme.com/template-design
-2. Export as JSON
-3. Save to `./templates/{name}.json`
-4. Add mapping in `pdfme/src/config/orgTemplateMapping.js`:
-   ```javascript
-   '123': 'your-template'
-   ```
-5. Restart: `docker-compose restart pdf-generator`
-
 ## Monitoring
 
+### Job Status (Database)
+
+```bash
+# Check processing jobs
+docker-compose exec postgres psql -U pdfme -d pdfme -c "
+  SELECT filename, status,
+         EXTRACT(EPOCH FROM (completed_at - created_at)) as duration_sec
+  FROM processing_jobs
+  ORDER BY created_at DESC
+  LIMIT 10;
+"
+
+# Job statistics (last 24h)
+docker-compose exec postgres psql -U pdfme -d pdfme -c "
+  SELECT * FROM job_statistics;
+"
+
+# Failed jobs
+docker-compose exec postgres psql -U pdfme -d pdfme -c "
+  SELECT * FROM failed_jobs;
+"
+
+# Find stuck jobs (>1 hour)
+docker-compose exec postgres psql -U pdfme -d pdfme -c "
+  SELECT * FROM find_stuck_jobs();
+"
+```
+
+### Service Logs
+
+```bash
+# Watch all logs
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f file-watcher
+docker-compose logs -f parser-service
+docker-compose logs -f pdf-generator
+docker-compose logs -f storage-service
+```
+
+### RabbitMQ Management
+
+**URL**: http://localhost:15672
+- Username: `admin`
+- Password: `admin123`
+
+**Monitor**:
+- Queue depths
+- Message rates
+- Consumer connections
+
 ### MinIO Console
-http://localhost:9001
+
+**URL**: http://localhost:9001
+- Username: `minioadmin`
+- Password: `minioadmin`
 
 **Buckets**:
 - `uploads` - Input files
 - `pdfs` - Generated PDFs
 
-### RabbitMQ Management
-http://localhost:15672 (admin / admin123)
-
-**Queues**:
-- `parse_ready` - Files to parse
-- `pdf_ready` - Data to generate
-- `storage_ready` - PDFs to store
-
-### Service Logs
+### Redis Cache
 
 ```bash
-docker-compose logs -f file-watcher
-docker-compose logs -f parser-service
-docker-compose logs -f pdf-generator
-docker-compose logs -f storage-service
+# Check cached files
+docker-compose exec redis redis-cli KEYS "processed:*"
+
+# Check specific file
+docker-compose exec redis redis-cli GET "processed:{file-hash}"
+
+# Memory usage
+docker-compose exec redis redis-cli INFO memory
+```
+
+## Duplicate Prevention
+
+### How It Works
+
+Files are identified by **content hash** (S3 ETag), not filename.
+
+**Scenarios:**
+
+1. **Same file, same name** → Skipped (Redis cache)
+2. **Same file, different name** → Skipped (hash matches)
+3. **Different file, same name** → Processed (different hash)
+
+**Example:**
+```bash
+# Upload file
+mc cp file.txt local/uploads/266003.txt
+→ Processed
+
+# Upload again (same name)
+mc cp file.txt local/uploads/266003.txt
+→ Skipped (duplicate)
+
+# Upload with different name
+mc cp file.txt local/uploads/DIFFERENT_NAME.txt
+→ Skipped (same hash)
 ```
 
 ## Service Endpoints
@@ -123,64 +161,128 @@ docker-compose logs -f storage-service
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
-| RabbitMQ Management | http://localhost:15672 | admin / admin123 |
-| PDF Generator API | http://localhost:3000 | - |
+| RabbitMQ Mgmt | http://localhost:15672 | admin / admin123 |
+| PDF Generator | http://localhost:3000 | - |
 | Parser API | http://localhost:8080 | - |
+| PostgreSQL | localhost:5432 | pdfme / pdfme_secure_pass |
+| Redis | localhost:6379 | - |
 
 ## Troubleshooting
 
-### File Not Processed
+### File Not Processing
 
-Check each stage:
+**Check each stage:**
+
 ```bash
-docker-compose logs file-watcher    # File detected?
-docker-compose logs parser-service  # Parsing successful?
-docker-compose logs pdf-generator   # PDF generated?
-docker-compose logs storage-service # Uploaded to MinIO?
+# 1. File-watcher detected it?
+docker-compose logs file-watcher | grep "your-file.txt"
+
+# 2. Check job status in DB
+docker-compose exec postgres psql -U pdfme -d pdfme -c "
+  SELECT * FROM processing_jobs WHERE filename='your-file.txt';
+"
+
+# 3. Check queue
+# Visit http://localhost:15672 → Queues tab
+
+# 4. Parser logs
+docker-compose logs parser-service | tail -50
+
+# 5. PDF generator logs
+docker-compose logs pdf-generator | tail -50
+
+# 6. Storage logs
+docker-compose logs storage-service | tail -50
 ```
 
-### Service Issues
+### Stuck Job (>1 hour)
 
 ```bash
-docker-compose ps                      # Check status
-docker-compose restart <service-name>  # Restart service
-docker-compose logs <service-name>     # View logs
+# Find stuck jobs
+docker-compose exec postgres psql -U pdfme -d pdfme -c "
+  SELECT * FROM find_stuck_jobs();
+"
+
+# Manually retry
+docker-compose exec postgres psql -U pdfme -d pdfme -c "
+  SELECT mark_job_for_retry('job-uuid-here');
+"
+
+# Or restart file-watcher (auto-detects stuck jobs)
+docker-compose restart file-watcher
 ```
 
 ### Reset System
 
 ```bash
+# Stop all services
+docker-compose down
+
+# Clear volumes (WARNING: deletes all data!)
 docker-compose down -v
+
+# Fresh start
 docker-compose up -d --build
 ```
 
-## Advanced
-
-### Direct Queue Access
-
-Send messages directly to queues using `test_producer.js`
-
-### Scaling Services
+### Clear Completed Jobs
 
 ```bash
-docker-compose up -d --scale pdf-generator=3
-docker-compose up -d --scale storage-service=2
+# Delete jobs older than 90 days
+docker-compose exec postgres psql -U pdfme -d pdfme -c "
+  SELECT cleanup_old_jobs(90);
+"
 ```
 
-### Health Checks
+## Scaling
+
+### For Month-End Batch (5000 files)
 
 ```bash
-curl http://localhost:3000/health
+# Scale services
+docker-compose up -d \
+  --scale file-watcher=2 \
+  --scale parser-service=5 \
+  --scale pdf-generator=10 \
+  --scale storage-service=2
+
+# Monitor progress
+docker-compose exec postgres psql -U pdfme -d pdfme -c "
+  SELECT status, COUNT(*) FROM processing_jobs GROUP BY status;
+"
 ```
 
-## Technical Documentation
+## Maintenance
 
-See `docs/` directory:
-- `file-watcher.md` - File watcher specs
-- `parser.md` - Parser specs
-- `pdfme.md` - PDF generator specs
-- `storage-service.md` - Storage specs
-- `message-flow.md` - Queue message formats
-- `template-mapping.md` - Field mapping rules
-- `api-reference.md` - HTTP API reference
-- `deployment.md` - Deployment guide
+### Database Backup
+
+```bash
+# Backup
+docker-compose exec postgres pg_dump -U pdfme pdfme > backup_$(date +%Y%m%d).sql
+
+# Restore
+cat backup_20241026.sql | docker-compose exec -T postgres psql -U pdfme pdfme
+```
+
+### Redis Backup
+
+Redis automatically persists:
+- AOF (append-only file): Real-time
+- RDB snapshot: Every 60s if 1000 keys changed
+
+### Template Management
+
+Templates stored in `templates/` directory.
+
+**Add new template:**
+1. Design at https://pdfme.com/template-design
+2. Export JSON
+3. Copy to `templates/your-template.json`
+4. Restart: `docker-compose restart pdf-generator`
+
+## Technical Details
+
+See:
+- `DESIGN.md` - System architecture and design principles
+- `README.md` - Project overview and quick start
+- `docs/` - Service-specific documentation

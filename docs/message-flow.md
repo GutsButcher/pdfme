@@ -1,100 +1,91 @@
-# Message Flow Specification
+# Message Flow
 
-## Complete Pipeline
+## Pipeline
 
 ```
-File Upload (MinIO:uploads)
-    ↓
-[parse_ready] → Parser → [pdf_ready] → PDF Generator → [storage_ready] → Storage → MinIO:pdfs
+S3 uploads → File-Watcher → [parse_ready] → Parser → [pdf_ready] → PDF Generator → [storage_ready] → Storage → S3 pdfs
+                ↓                                                                            ↓
+           PostgreSQL                                                                   PostgreSQL
+              Redis                                                                        Redis
 ```
 
-## Queue Definitions
+## Queue: parse_ready
 
-### parse_ready
-
-**Producer**: File Watcher
+**Producer**: File-Watcher
 **Consumer**: Parser
 
-**Message**:
 ```json
 {
-  "filename": "string",
-  "file_content": "string (base64)",
-  "org_id": "string"
+  "job_id": "1a4d1ecf-5319-4bef-abcf-9ec4f212496c",
+  "file_hash": "3afbe4f0cec23d2079926ad2c28207cd",
+  "filename": "266003.txt",
+  "file_content": "base64-encoded-content..."
 }
 ```
 
-### pdf_ready
+**Fields:**
+- `job_id`: UUID from database (for tracking)
+- `file_hash`: S3 ETag (MD5 hash for deduplication)
+- `filename`: Original filename
+- `file_content`: Base64-encoded file content
+
+## Queue: pdf_ready
 
 **Producer**: Parser
 **Consumer**: PDF Generator
 
-**Message**:
 ```json
 {
-  "orgId": "string",
-  "cardNumber": "string",
-  "statementDate": "string (DD/MM/YYYY)",
-  "name": "string",
-  "address": "string",
-  "availableBalance": number,
-  "openingBalance": number,
-  "toatalDepits": number,
-  "totalCredits": number,
-  "currentBalance": number,
+  "job_id": "1a4d1ecf-5319-4bef-abcf-9ec4f212496c",
+  "file_hash": "3afbe4f0cec23d2079926ad2c28207cd",
+  "orgId": "266",
+  "name": "AHMED ADEL HUSAIN ALI",
+  "cardNumber": "5117244499894536",
+  "statementDate": "21/09/2025",
+  "availableBalance": 1026.248,
   "transactions": [
     {
-      "date": "string|null (DD/MM/YYYY)",
-      "postDate": "string|null (DD/MM/YYYY)",
-      "description": "string",
-      "amount": number,
-      "currency": "string",
-      "amountInBHD": number,
-      "cr": boolean
+      "date": "06/09/2025",
+      "postDate": "06/09/2025",
+      "description": "Payment Received",
+      "amountInBHD": 149.427,
+      "cr": true
     }
   ]
 }
 ```
 
-### storage_ready
+**Fields:**
+- `job_id`, `file_hash`: Passed through from parse_ready
+- Parsed statement data
+- Transactions array
+
+## Queue: storage_ready
 
 **Producer**: PDF Generator
-**Consumer**: Storage Service
+**Consumer**: Storage
 
-**Message**:
 ```json
 {
-  "bucket_name": "string",
-  "filename": "string",
-  "file_content": "string (base64)"
+  "job_id": "1a4d1ecf-5319-4bef-abcf-9ec4f212496c",
+  "file_hash": "3afbe4f0cec23d2079926ad2c28207cd",
+  "bucket_name": "pdfs",
+  "filename": "statement_266_1761480965145.pdf",
+  "file_content": "base64-encoded-pdf..."
 }
 ```
 
-## Queue Properties
+**Fields:**
+- `job_id`: For DB update
+- `file_hash`: For Redis cache update
+- `bucket_name`: Target S3 bucket
+- `filename`: Generated PDF filename
+- `file_content`: Base64-encoded PDF
 
-All queues:
-- **Durable**: true
-- **Persistent messages**: true
-- **Prefetch**: 1
+## Message Properties
 
-## RabbitMQ Connection
-
-```
-URL: amqp://admin:admin123@rabbitmq:5672
-Management UI: http://localhost:15672
-```
-
-## MinIO Buckets
-
-### uploads
-- **Purpose**: Input files
-- **Created by**: File Watcher
-- **Access**: Write (users), Read (File Watcher)
-
-### pdfs
-- **Purpose**: Generated PDFs
-- **Created by**: Storage Service
-- **Access**: Write (Storage Service), Read (users)
-
-**MinIO Console**: http://localhost:9001
-**Credentials**: minioadmin / minioadmin
+**All queues:**
+- Durable: true (survive broker restart)
+- Manual ACK: true (reliability)
+- Prefetch: 1 (process one at a time)
+- Persistent: true (messages survive restart)
