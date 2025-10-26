@@ -5,6 +5,8 @@ go 1.21
 require (
 	github.com/minio/minio-go/v7 v7.0.63
 	github.com/rabbitmq/amqp091-go v1.9.0
+	github.com/lib/pq v1.10.9
+	github.com/redis/go-redis/v9 v9.3.0
 )
 
 require (
