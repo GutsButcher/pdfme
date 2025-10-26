@@ -1,12 +1,15 @@
 package rabbitmq
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
+	"github.com/pdfme/storage-service/pkg/cache"
+	"github.com/pdfme/storage-service/pkg/database"
 	minioPkg "github.com/pdfme/storage-service/pkg/minio"
 	"github.com/pdfme/storage-service/pkg/types"
 
@@ -20,10 +23,12 @@ type Consumer struct {
 	channel     *amqp.Channel
 	queueName   string
 	minioClient *minio.Client
+	db          *database.DB
+	redis       *cache.RedisCache
 }
 
 // NewConsumer creates a new RabbitMQ consumer
-func NewConsumer(rabbitURL, queueName string, minioClient *minio.Client) (*Consumer, error) {
+func NewConsumer(rabbitURL, queueName string, minioClient *minio.Client, db *database.DB, redis *cache.RedisCache) (*Consumer, error) {
 	conn, err := connectWithRetry(rabbitURL, 10, 5*time.Second)
 	if err != nil {
 		return nil, err
@@ -47,7 +52,7 @@ func NewConsumer(rabbitURL, queueName string, minioClient *minio.Client) (*Consu
 		return nil, fmt.Errorf("failed to declare queue: %s", err)
 	}
 
-	// Set prefetch count
+	// Set prefetch count (process one message at a time)
 	err = channel.Qos(1, 0, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set QoS: %s", err)
@@ -60,6 +65,8 @@ func NewConsumer(rabbitURL, queueName string, minioClient *minio.Client) (*Consu
 		channel:     channel,
 		queueName:   queueName,
 		minioClient: minioClient,
+		db:          db,
+		redis:       redis,
 	}, nil
 }
 
@@ -91,7 +98,7 @@ func (c *Consumer) Start() error {
 	msgs, err := c.channel.Consume(
 		c.queueName,
 		"",    // consumer
-		false, // auto-ack
+		false, // auto-ack (manual ack for reliability)
 		false, // exclusive
 		false, // no-local
 		false, // no-wait
@@ -124,6 +131,8 @@ func (c *Consumer) Start() error {
 
 // processMessage processes a single message
 func (c *Consumer) processMessage(msg amqp.Delivery) error {
+	ctx := context.Background()
+
 	log.Println("\n[→] Received message")
 
 	// Parse message
@@ -132,28 +141,65 @@ func (c *Consumer) processMessage(msg amqp.Delivery) error {
 		return fmt.Errorf("failed to parse message: %s", err)
 	}
 
+	log.Printf("  Job ID: %s\n", storageMsg.JobID[:8]+"...")
+	log.Printf("  File Hash: %s\n", storageMsg.FileHash[:12]+"...")
 	log.Printf("  Bucket: %s\n", storageMsg.BucketName)
 	log.Printf("  Filename: %s\n", storageMsg.Filename)
 
-	// Decode base64 content
+	// Step 1: Check if job is already completed (idempotency)
+	job, err := c.db.GetJobByID(ctx, storageMsg.JobID)
+	if err != nil {
+		return fmt.Errorf("failed to get job from DB: %w", err)
+	}
+
+	if job == nil {
+		return fmt.Errorf("job not found in database: %s", storageMsg.JobID)
+	}
+
+	if job.Status == "completed" {
+		log.Printf("  [↷] Job already completed, skipping\n")
+		return nil // ACK the duplicate message
+	}
+
+	// Step 2: Decode base64 content
 	fileBytes, err := base64.StdEncoding.DecodeString(storageMsg.FileContent)
 	if err != nil {
-		return fmt.Errorf("failed to decode base64: %s", err)
+		c.db.FailJob(ctx, storageMsg.JobID, fmt.Sprintf("Base64 decode failed: %v", err))
+		return fmt.Errorf("failed to decode base64: %w", err)
 	}
 
-	log.Printf("  Size: %d bytes\n", len(fileBytes))
+	log.Printf("  PDF Size: %d bytes\n", len(fileBytes))
 
-	// Ensure bucket exists
+	// Step 3: Ensure bucket exists
 	if err := minioPkg.EnsureBucket(storageMsg.BucketName, c.minioClient); err != nil {
-		return fmt.Errorf("failed to ensure bucket: %s", err)
+		c.db.FailJob(ctx, storageMsg.JobID, fmt.Sprintf("Bucket creation failed: %v", err))
+		return fmt.Errorf("failed to ensure bucket: %w", err)
 	}
 
-	// Upload to MinIO
+	// Step 4: Upload to MinIO
+	log.Printf("  [↑] Uploading to MinIO...\n")
 	if err := minioPkg.UploadObject(fileBytes, storageMsg.Filename, storageMsg.BucketName, c.minioClient); err != nil {
-		return fmt.Errorf("failed to upload to MinIO: %s", err)
+		c.db.FailJob(ctx, storageMsg.JobID, fmt.Sprintf("Upload failed: %v", err))
+		return fmt.Errorf("failed to upload to MinIO: %w", err)
 	}
 
-	log.Println("[✓] Message processed successfully\n")
+	// Step 5: Update database with completion
+	pdfLocation := fmt.Sprintf("%s/%s", storageMsg.BucketName, storageMsg.Filename)
+	if err := c.db.CompleteJob(ctx, storageMsg.JobID, pdfLocation); err != nil {
+		return fmt.Errorf("failed to update job status: %w", err)
+	}
+
+	log.Printf("  [✓] Job marked as completed in DB\n")
+
+	// Step 6: Update Redis cache (file is now completed)
+	if err := c.redis.SetFileCompleted(ctx, storageMsg.FileHash); err != nil {
+		// Non-fatal, just log warning
+		log.Printf("  [!] Warning: failed to update Redis cache: %v\n", err)
+	} else {
+		log.Printf("  [✓] Redis cache updated\n")
+	}
+
+	log.Printf("[✓] Message processed successfully: %s\n", pdfLocation)
 	return nil
 }
 
