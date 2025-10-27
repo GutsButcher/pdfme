@@ -137,21 +137,10 @@ func (p *FileProcessor) processFile(ctx context.Context, obj minio.ObjectInfo) e
 		log.Printf("    [↷] Skip: already completed (Redis cache)\n")
 		return nil
 	} else if status == "processing" {
-		// Check if stuck (> 1 hour)
-		job, err := p.db.GetJobByFileHash(ctx, fileHash)
-		if err != nil {
-			return fmt.Errorf("failed to check job timeout: %w", err)
-		}
-		if job != nil && job.ProcessingStartedAt != nil {
-			elapsed := time.Since(*job.ProcessingStartedAt)
-			if elapsed > time.Hour {
-				log.Printf("    [!] Job stuck for %.0f minutes, retrying...\n", elapsed.Minutes())
-				// Will retry below
-			} else {
-				log.Printf("    [↷] Skip: still processing (%.0f min elapsed)\n", elapsed.Minutes())
-				return nil
-			}
-		}
+		// Trust Redis TTL (1h) - if it exists, job is < 1h old
+		// CheckStuckJobs() handles stuck job detection separately
+		log.Printf("    [↷] Skip: still processing (Redis cache, < 1h)\n")
+		return nil
 	}
 
 	// Step 2: Try to create job in DB (atomic with duplicate check)
