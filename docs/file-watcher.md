@@ -57,22 +57,27 @@ Every 10 seconds:
 2. For each file:
    a. Use ETag as file_hash
    b. Check Redis: processed:{hash}?
-      → "completed": skip
-      → "processing": check timeout
-      → nil: continue
+      → "completed": skip (no DB query)
+      → "processing": skip (trust 1h TTL, no DB query)
+      → nil: continue to DB
    c. Try INSERT into processing_jobs
-      → Duplicate: skip
+      → Duplicate: Check status for retry logic
       → Success: continue
    d. Download file (only if new)
    e. Publish to parse_ready
    f. Update status: 'processing'
-   g. Set Redis cache (1h TTL)
+   g. Set Redis: "processing" (1h TTL)
 
-Stuck job detection:
+Stuck job detection (separate function):
 3. Find jobs with processing_started_at > 1h
 4. Retry count < max (3)?
-   → Yes: Reset to 'pending', clear cache
+   → Yes: Reset to 'pending', clear Redis
    → No: Mark as 'failed'
+
+Optimization: Trust Redis TTL
+- If "processing" exists in Redis, it's < 1h old (guaranteed by TTL)
+- No need to query DB to check timeout
+- Saves ~1000 DB queries per scan for busy systems
 ```
 
 ## Database Operations
@@ -100,15 +105,23 @@ SELECT * FROM find_stuck_jobs()
 
 ## Redis Operations
 
-**Check cache:**
+**Check cache (fast path):**
 ```
 GET processed:{file_hash}
+→ "completed": Skip immediately, no DB query
+→ "processing": Skip immediately, no DB query (trust 1h TTL)
+→ nil: Continue to DB check
 ```
 
 **Set cache:**
 ```
-SETEX processed:{file_hash} 3600 "processing"
+SETEX processed:{file_hash} 3600 "processing"   # 1h TTL
 ```
+
+**Optimization:**
+If Redis key exists with "processing", job is guaranteed < 1h old (by TTL).
+No need to query DB for timeout check.
+Stuck jobs detected separately by CheckStuckJobs() function.
 
 ## Output
 

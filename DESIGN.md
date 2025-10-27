@@ -39,7 +39,10 @@
 ### 3. Deduplication Strategy
 - **S3 ETag** as file hash (MD5, no download needed)
 - **PostgreSQL UNIQUE constraint**: Prevents duplicate jobs
-- **Redis cache**: Fast-path for completed files (24h TTL)
+- **Redis cache**: Fast-path optimization
+  - "completed" (24h TTL): Skip, no DB query
+  - "processing" (1h TTL): Skip, no DB query (trust TTL)
+  - Stuck job detection via separate CheckStuckJobs()
 
 ### 4. Natural Throttling
 - RabbitMQ: One message per consumer (prefetch=1)
@@ -53,12 +56,15 @@
    ↓
 2. File-Watcher (every 10s):
    - List S3 files (metadata only, uses ETag as hash)
-   - Check Redis: already completed? → skip
+   - Check Redis:
+     → "completed"? → skip (no DB query)
+     → "processing"? → skip (< 1h by TTL, no DB query)
+     → nil? → continue to DB
    - Try INSERT into DB (ON CONFLICT DO NOTHING)
-     → Duplicate? → skip
+     → Duplicate? → Check status for retry logic
      → New? → download file, publish to MQ
    - Update status: 'processing'
-   - Set Redis cache (1h TTL)
+   - Set Redis cache: "processing" (1h TTL)
    ↓
 3. Parser:
    - Consume from parse_ready
