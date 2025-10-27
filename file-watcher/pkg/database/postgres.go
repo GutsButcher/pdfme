@@ -94,9 +94,9 @@ func (db *DB) UpdateJobStatus(ctx context.Context, jobID, status string) error {
 	query := `
 		UPDATE processing_jobs
 		SET status = $1,
-		    processing_started_at = CASE WHEN $1 = 'processing' THEN NOW() ELSE processing_started_at END,
-		    completed_at = CASE WHEN $1 = 'completed' THEN NOW() ELSE completed_at END
-		WHERE id = $2
+		    processing_started_at = CASE WHEN $1 = 'processing' AND processing_started_at IS NULL THEN NOW() ELSE processing_started_at END,
+		    completed_at = CASE WHEN $1 = 'completed' AND completed_at IS NULL THEN NOW() ELSE completed_at END
+		WHERE id = $2::uuid
 	`
 
 	_, err := db.ExecContext(ctx, query, status, jobID)
