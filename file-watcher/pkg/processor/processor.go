@@ -2,7 +2,6 @@ package processor
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -193,28 +192,56 @@ func (p *FileProcessor) processFile(ctx context.Context, obj minio.ObjectInfo) e
 
 	log.Printf("    [+] Created job: %s\n", jobID[:8]+"...")
 
-	// Step 3: Download file (only now, after confirming we need to process it!)
+	// Step 3: Download file with timeout (only now, after confirming we need to process it!)
 	log.Printf("    [↓] Downloading file...\n")
-	content, err := p.downloadFile(ctx, filename)
+
+	// Create context with 5-minute timeout for download
+	downloadCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	content, err := p.downloadFile(downloadCtx, filename)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded || downloadCtx.Err() == context.DeadlineExceeded {
+			// Download timed out
+			errMsg := "Download timeout after 5 minutes"
+			log.Printf("    [✗] %s\n", errMsg)
+			p.db.UpdateJobWithError(ctx, jobID, errMsg)
+			// Mark for retry
+			p.db.MarkJobForRetry(ctx, jobID)
+			return fmt.Errorf("%s", errMsg)
+		}
 		p.db.UpdateJobWithError(ctx, jobID, fmt.Sprintf("Download failed: %v", err))
 		return fmt.Errorf("failed to download file: %w", err)
 	}
 
-	// Step 4: Encode to base64
-	base64Content := base64.StdEncoding.EncodeToString(content)
+	fileSize := int64(len(content))
+	log.Printf("    [✓] Downloaded %d bytes (%.2f MB)\n", fileSize, float64(fileSize)/1024/1024)
 
-	// Step 5: Publish to MQ
-	log.Printf("    [→] Publishing to MQ...\n")
+	// Step 4: Upload file to Redis as blob (temporary storage)
+	log.Printf("    [↑] Uploading to Redis...\n")
+	redisKey := fmt.Sprintf("blob:%s", fileHash)
+
+	// Store with 1-hour TTL (parser should consume within this time)
+	if err := p.redis.StoreFileBlob(ctx, fileHash, content, 1*time.Hour); err != nil {
+		p.db.UpdateJobWithError(ctx, jobID, fmt.Sprintf("Redis upload failed: %v", err))
+		return fmt.Errorf("failed to upload to Redis: %w", err)
+	}
+	log.Printf("    [✓] Uploaded to Redis (key: %s, TTL: 1h)\n", redisKey)
+
+	// Step 5: Publish metadata to MQ (NOT file content!)
+	log.Printf("    [→] Publishing metadata to MQ...\n")
 	message := &types.FileMessage{
-		JobID:       jobID,
-		FileHash:    fileHash,
-		Filename:    filename,
-		FileContent: base64Content,
+		JobID:    jobID,
+		FileHash: fileHash,
+		Filename: filename,
+		RedisKey: redisKey,
+		FileSize: fileSize,
 	}
 
 	if err := p.producer.PublishFile(message); err != nil {
 		p.db.UpdateJobWithError(ctx, jobID, fmt.Sprintf("MQ publish failed: %v", err))
+		// Cleanup Redis blob if MQ publish fails
+		p.redis.DeleteFileBlob(ctx, fileHash)
 		return fmt.Errorf("failed to publish to MQ: %w", err)
 	}
 
@@ -223,9 +250,9 @@ func (p *FileProcessor) processFile(ctx context.Context, obj minio.ObjectInfo) e
 		log.Printf("    [!] Warning: failed to update status: %v\n", err)
 	}
 
-	// Step 7: Set Redis cache
+	// Step 7: Set Redis status cache
 	if err := p.redis.SetFileStatus(ctx, fileHash, "processing", 1*time.Hour); err != nil {
-		log.Printf("    [!] Warning: failed to set Redis: %v\n", err)
+		log.Printf("    [!] Warning: failed to set Redis status: %v\n", err)
 	}
 
 	log.Printf("    [✓] Queued for processing\n")
@@ -248,7 +275,7 @@ func (p *FileProcessor) downloadFile(ctx context.Context, filename string) ([]by
 	return content, nil
 }
 
-// CheckStuckJobs finds and retries stuck jobs
+// CheckStuckJobs finds and retries stuck jobs (processing > 1 hour)
 func (p *FileProcessor) CheckStuckJobs(ctx context.Context) error {
 	stuckJobs, err := p.db.FindStuckJobs(ctx)
 	if err != nil {
@@ -259,7 +286,7 @@ func (p *FileProcessor) CheckStuckJobs(ctx context.Context) error {
 		return nil
 	}
 
-	log.Printf("\n[!] Found %d stuck jobs\n", len(stuckJobs))
+	log.Printf("\n[!] Found %d stuck jobs in 'processing' status\n", len(stuckJobs))
 
 	for _, job := range stuckJobs {
 		elapsed := time.Since(*job.ProcessingStartedAt)
@@ -276,6 +303,42 @@ func (p *FileProcessor) CheckStuckJobs(ctx context.Context) error {
 			// Clear Redis cache so it gets reprocessed
 			p.redis.DeleteFileStatus(ctx, job.FileHash)
 			log.Printf("    [✓] Marked for retry\n")
+		} else {
+			log.Printf("    [✗] Max retries exceeded, marked as failed\n")
+		}
+	}
+
+	return nil
+}
+
+// CheckStuckPendingJobs finds and retries jobs stuck in pending (> 10 minutes)
+func (p *FileProcessor) CheckStuckPendingJobs(ctx context.Context) error {
+	stuckJobs, err := p.db.FindStuckPendingJobs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to find stuck pending jobs: %w", err)
+	}
+
+	if len(stuckJobs) == 0 {
+		return nil
+	}
+
+	log.Printf("\n[!] Found %d stuck jobs in 'pending' status (likely pod crash during download)\n", len(stuckJobs))
+
+	for _, job := range stuckJobs {
+		elapsed := time.Since(job.CreatedAt)
+		log.Printf("  - Job %s: %s (pending for %.0f min, retry %d/%d)\n",
+			job.ID[:8]+"...", job.Filename, elapsed.Minutes(), job.RetryCount, job.MaxRetries)
+
+		success, err := p.db.MarkJobForRetry(ctx, job.ID)
+		if err != nil {
+			log.Printf("    [✗] Failed to retry: %v\n", err)
+			continue
+		}
+
+		if success {
+			// Clear Redis cache so it gets reprocessed
+			p.redis.DeleteFileStatus(ctx, job.FileHash)
+			log.Printf("    [✓] Marked for retry (will be picked up in next scan)\n")
 		} else {
 			log.Printf("    [✗] Max retries exceeded, marked as failed\n")
 		}

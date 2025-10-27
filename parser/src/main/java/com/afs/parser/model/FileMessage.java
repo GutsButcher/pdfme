@@ -11,8 +11,11 @@ public class FileMessage {
 
     private String filename;
 
-    @JsonProperty("file_content")
-    private String fileContent;  // Base64 encoded
+    @JsonProperty("redis_key")
+    private String redisKey;     // Redis key where file content is stored
+
+    @JsonProperty("file_size")
+    private Long fileSize;       // File size in bytes
 
     public FileMessage() {
     }
@@ -41,11 +44,19 @@ public class FileMessage {
         this.filename = filename;
     }
 
-    public String getFileContent() {
-        return fileContent;
+    public String getRedisKey() {
+        return redisKey;
     }
 
-    public void setFileContent(String fileContent) {
-        this.fileContent = fileContent;
+    public void setRedisKey(String redisKey) {
+        this.redisKey = redisKey;
+    }
+
+    public Long getFileSize() {
+        return fileSize;
+    }
+
+    public void setFileSize(Long fileSize) {
+        this.fileSize = fileSize;
     }
 }

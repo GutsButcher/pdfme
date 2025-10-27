@@ -67,6 +67,31 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Function to find stuck pending jobs (pending > 10 minutes)
+CREATE OR REPLACE FUNCTION find_stuck_pending_jobs()
+RETURNS TABLE (
+    job_id UUID,
+    filename VARCHAR(255),
+    file_hash VARCHAR(64),
+    created_at TIMESTAMP,
+    minutes_pending NUMERIC
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        id,
+        processing_jobs.filename,
+        processing_jobs.file_hash,
+        processing_jobs.created_at,
+        EXTRACT(EPOCH FROM (NOW() - processing_jobs.created_at)) / 60 as minutes_pending
+    FROM processing_jobs
+    WHERE status = 'pending'
+      AND created_at < NOW() - INTERVAL '10 minutes'
+      AND retry_count < max_retries
+    ORDER BY created_at ASC;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Function to mark job for retry
 CREATE OR REPLACE FUNCTION mark_job_for_retry(job_uuid UUID)
 RETURNS BOOLEAN AS $$
@@ -155,7 +180,7 @@ CREATE TABLE schema_version (
 );
 
 INSERT INTO schema_version (version, description)
-VALUES (2, 'Simplified schema - job state tracking only, no content storage');
+VALUES (3, 'Added stuck pending jobs detection - prevents jobs stuck in pending status');
 
 -- Grant permissions
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO pdfme;
@@ -166,8 +191,11 @@ GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO pdfme;
 -- Sample Queries for Operations
 -- ============================================================
 
--- Find stuck jobs:
+-- Find stuck jobs (processing > 1 hour):
 -- SELECT * FROM find_stuck_jobs();
+
+-- Find stuck pending jobs (pending > 10 minutes):
+-- SELECT * FROM find_stuck_pending_jobs();
 
 -- Retry a stuck job:
 -- SELECT mark_job_for_retry('job-uuid-here');

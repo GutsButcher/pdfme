@@ -138,10 +138,15 @@ func main() {
 		log.Printf("[!] Error during initial scan: %v\n", err)
 	}
 
-	// Check for stuck jobs
-	log.Println("\n[*] Checking for stuck jobs...")
+	// Check for stuck jobs (both processing and pending)
+	log.Println("\n[*] Checking for stuck jobs (processing > 1h)...")
 	if err := fileProcessor.CheckStuckJobs(ctx); err != nil {
 		log.Printf("[!] Error checking stuck jobs: %v\n", err)
+	}
+
+	log.Println("\n[*] Checking for stuck pending jobs (pending > 10min)...")
+	if err := fileProcessor.CheckStuckPendingJobs(ctx); err != nil {
+		log.Printf("[!] Error checking stuck pending jobs: %v\n", err)
 	}
 
 	// Poll periodically
@@ -152,9 +157,13 @@ func main() {
 			log.Printf("[!] Error during scan: %v\n", err)
 		}
 
-		// Check for stuck jobs every scan
+		// Check for stuck jobs every scan (both processing and pending)
 		if err := fileProcessor.CheckStuckJobs(ctx); err != nil {
 			log.Printf("[!] Error checking stuck jobs: %v\n", err)
+		}
+
+		if err := fileProcessor.CheckStuckPendingJobs(ctx); err != nil {
+			log.Printf("[!] Error checking stuck pending jobs: %v\n", err)
 		}
 	}
 }

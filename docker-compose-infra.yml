@@ -1,0 +1,139 @@
+# ============================================================
+# Infrastructure Services Only - For Local Development
+# ============================================================
+#
+# This file provides ONLY the backing services (databases, message queues, storage)
+# Developers run their application services locally and connect to these.
+#
+# Usage:
+#   docker-compose -f docker-compose-infra.yml up -d
+#
+# Services Included:
+#   - Valkey (Redis-compatible, for caching + blob storage)
+#   - MinIO (S3-compatible object storage)
+#   - RabbitMQ (Message broker)
+#   - PostgreSQL (Job state tracking database)
+#
+# ============================================================
+
+services:
+  # ===== RabbitMQ Message Broker =====
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: dev-rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"    # AMQP port (for application connections)
+      - "15672:15672"  # Management UI (http://localhost:15672)
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - dev-network
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===== MinIO Object Storage (S3-compatible) =====
+  minio:
+    image: minio/minio:latest
+    container_name: dev-minio
+    hostname: minio
+    ports:
+      - "9000:9000"    # API port (for S3 SDK connections)
+      - "9001:9001"    # Console UI (http://localhost:9001)
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - dev-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===== PostgreSQL Database =====
+  postgres:
+    image: postgres:16-alpine
+    container_name: dev-postgres
+    hostname: postgres
+    ports:
+      - "5432:5432"    # PostgreSQL port
+    environment:
+      POSTGRES_DB: pdfme
+      POSTGRES_USER: pdfme
+      POSTGRES_PASSWORD: pdfme_secure_pass
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db-simplified.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    command: >
+      postgres
+      -c max_connections=400
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c listen_addresses='*'
+    networks:
+      - dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdfme -d pdfme"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ===== Valkey (Redis-compatible) =====
+  # Used for: Deduplication cache + Large file blob storage (150MB+)
+  valkey:
+    image: valkey/valkey:7-alpine
+    container_name: dev-valkey
+    hostname: valkey
+    ports:
+      - "6379:6379"    # Valkey/Redis port
+    command: >
+      valkey-server
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --proto-max-bulk-len 256mb
+      --client-output-buffer-limit normal 0 0 0
+      --save 60 1000
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - valkey_data:/data
+    networks:
+      - dev-network
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+# ===== Volumes =====
+volumes:
+  rabbitmq_data:
+    driver: local
+  minio_data:
+    driver: local
+  postgres_data:
+    driver: local
+  valkey_data:
+    driver: local
+
+# ===== Network =====
+networks:
+  dev-network:
+    driver: bridge
+    name: pdfme-dev-network

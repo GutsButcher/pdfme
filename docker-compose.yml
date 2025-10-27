@@ -76,8 +76,10 @@ services:
       - "6379:6379"
     command: >
       redis-server
-      --maxmemory 512mb
+      --maxmemory 2gb
       --maxmemory-policy allkeys-lru
+      --proto-max-bulk-len 256mb
+      --client-output-buffer-limit normal 0 0 0
       --save 60 1000
       --appendonly yes
       --appendfsync everysec

@@ -183,6 +183,45 @@ func (db *DB) FindStuckJobs(ctx context.Context) ([]*Job, error) {
 	return jobs, nil
 }
 
+// FindStuckPendingJobs finds jobs that are stuck in pending (> 10 minutes)
+func (db *DB) FindStuckPendingJobs(ctx context.Context) ([]*Job, error) {
+	query := `
+		SELECT id, file_hash, filename, status, created_at,
+		       retry_count, max_retries
+		FROM processing_jobs
+		WHERE status = 'pending'
+		  AND created_at < NOW() - INTERVAL '10 minutes'
+		  AND retry_count < max_retries
+		ORDER BY created_at ASC
+	`
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find stuck pending jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*Job
+	for rows.Next() {
+		job := &Job{}
+		err := rows.Scan(
+			&job.ID,
+			&job.FileHash,
+			&job.Filename,
+			&job.Status,
+			&job.CreatedAt,
+			&job.RetryCount,
+			&job.MaxRetries,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan job: %w", err)
+		}
+		jobs = append(jobs, job)
+	}
+
+	return jobs, nil
+}
+
 // MarkJobForRetry marks a job for retry
 func (db *DB) MarkJobForRetry(ctx context.Context, jobID string) (bool, error) {
 	query := `SELECT mark_job_for_retry($1)`
