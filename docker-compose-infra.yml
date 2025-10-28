@@ -1,21 +1,3 @@
-# ============================================================
-# Infrastructure Services Only - For Local Development
-# ============================================================
-#
-# This file provides ONLY the backing services (databases, message queues, storage)
-# Developers run their application services locally and connect to these.
-#
-# Usage:
-#   docker-compose -f docker-compose-infra.yml up -d
-#
-# Services Included:
-#   - Valkey (Redis-compatible, for caching + blob storage)
-#   - MinIO (S3-compatible object storage)
-#   - RabbitMQ (Message broker)
-#   - PostgreSQL (Job state tracking database)
-#
-# ============================================================
-
 services:
   # ===== RabbitMQ Message Broker =====
   rabbitmq:
@@ -23,7 +5,7 @@ services:
     container_name: dev-rabbitmq
     hostname: rabbitmq
     ports:
-      - "5672:5672"    # AMQP port (for application connections)
+      - "5672:5672"    # (for application connections)
       - "15672:15672"  # Management UI (http://localhost:15672)
     environment:
       RABBITMQ_DEFAULT_USER: admin
@@ -94,7 +76,6 @@ services:
     restart: unless-stopped
 
   # ===== Valkey (Redis-compatible) =====
-  # Used for: Deduplication cache + Large file blob storage (150MB+)
   valkey:
     image: valkey/valkey:7-alpine
     container_name: dev-valkey
@@ -121,7 +102,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-# ===== Volumes =====
 volumes:
   rabbitmq_data:
     driver: local
@@ -132,7 +112,6 @@ volumes:
   valkey_data:
     driver: local
 
-# ===== Network =====
 networks:
   dev-network:
     driver: bridge
