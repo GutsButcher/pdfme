@@ -3,7 +3,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: rabbitmq-secret
-  namespace: pdfme
+  namespace: eps
 type: Opaque
 stringData:
   username: admin
@@ -13,7 +13,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: rabbitmq-config
-  namespace: pdfme
+  namespace: eps
 data:
   rabbitmq.conf: |
     # Add your RabbitMQ configuration here
@@ -22,8 +22,8 @@ data:
 apiVersion: v1
 kind: Service
 metadata:
-  name: rabbitmq
-  namespace: pdfme
+  name: rabbitmq-service
+  namespace: eps
 spec:
   type: ClusterIP
   ports:
@@ -40,7 +40,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: rabbitmq
-  namespace: pdfme
+  namespace: eps
 spec:
   replicas: 1
   selector:
@@ -117,7 +117,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: rabbitmq-pvc
-  namespace: pdfme
+  namespace: eps
 spec:
   accessModes:
     - ReadWriteOnce

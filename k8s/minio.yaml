@@ -3,7 +3,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: minio-secret
-  namespace: pdfme
+  namespace: eps
 type: Opaque
 stringData:
   root-user: minioadmin
@@ -12,8 +12,8 @@ stringData:
 apiVersion: v1
 kind: Service
 metadata:
-  name: minio
-  namespace: pdfme
+  name: minio-service
+  namespace: eps
 spec:
   type: ClusterIP
   ports:
@@ -30,7 +30,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: minio
-  namespace: pdfme
+  namespace: eps
 spec:
   replicas: 1
   selector:
@@ -101,7 +101,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: minio-pvc
-  namespace: pdfme
+  namespace: eps
 spec:
   accessModes:
     - ReadWriteOnce

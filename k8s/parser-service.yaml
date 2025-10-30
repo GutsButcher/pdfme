@@ -2,28 +2,28 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: parser-service-secret
-  namespace: pdfme
+  name: parser-secret
+  namespace: eps
 type: Opaque
 stringData:
+  RABBITMQ_HOST: "rabbitmq-service"
+  RABBITMQ_PORT: "5672"
   RABBITMQ_USERNAME: "admin"
   RABBITMQ_PASSWORD: "admin123"
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
   POSTGRES_USER: "pdfme"
   POSTGRES_PASSWORD: "pdfme_secure_pass"
   POSTGRES_DB: "pdfme"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: parser-service-config
-  namespace: pdfme
+  name: parser-config
+  namespace: eps
 data:
-  RABBITMQ_HOST: "rabbitmq"
-  RABBITMQ_PORT: "5672"
-  POSTGRES_HOST: "postgres-service"
-  POSTGRES_PORT: "5432"
-  REDIS_HOST: "redis"
-  REDIS_PORT: "6379"
   SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "15"
   SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "5"
 ---
@@ -31,7 +31,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: parser-service
-  namespace: pdfme
+  namespace: eps
 spec:
   type: ClusterIP
   ports:
@@ -39,25 +39,25 @@ spec:
       port: 8080
       targetPort: 8080
   selector:
-    app: parser-service
+    app: parser
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: parser-service
-  namespace: pdfme
+  name: parser
+  namespace: eps
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: parser-service
+      app: parser
   template:
     metadata:
       labels:
-        app: parser-service
+        app: parser
     spec:
       containers:
-      - name: parser-service
+      - name: parser
         image: gwynbliedd/pdfme-parser:latest
         imagePullPolicy: Always
         ports:
@@ -65,9 +65,9 @@ spec:
           name: http
         envFrom:
         - configMapRef:
-            name: parser-service-config
+            name: parser-config
         - secretRef:
-            name: parser-service-secret
+            name: parser-secret
         resources:
           requests:
             memory: "512Mi"
