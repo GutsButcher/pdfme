@@ -98,7 +98,7 @@ func (p *Producer) PublishFile(message *types.FileMessage) error {
 		return fmt.Errorf("failed to publish message: %s", err)
 	}
 
-	log.Printf("  Published to queue: %s (size: %d bytes)\n", message.Filename, len(message.FileContent))
+	log.Printf("  Published to queue: %s (size: %d bytes)\n", message.Filename, message.FileSize)
 	return nil
 }
 

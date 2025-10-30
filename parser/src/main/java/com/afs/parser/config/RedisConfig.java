@@ -7,7 +7,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.serializer.ByteArrayRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 @Configuration
@@ -34,7 +34,7 @@ public class RedisConfig {
         template.setKeySerializer(new StringRedisSerializer());
 
         // Use ByteArray serializer for values (large file content)
-        template.setValueSerializer(new ByteArrayRedisSerializer());
+        template.setValueSerializer(RedisSerializer.byteArray());
 
         template.afterPropertiesSet();
         return template;
