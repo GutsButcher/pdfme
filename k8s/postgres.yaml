@@ -1,4 +1,5 @@
 ---
+# Secret for PostgreSQL credentials
 apiVersion: v1
 kind: Secret
 metadata:
@@ -10,19 +11,24 @@ stringData:
   password: pdfme_secure_pass
   database: pdfme
 ---
+# PersistentVolumeClaim for PostgreSQL data
 apiVersion: v1
-kind: ConfigMap
+kind: PersistentVolumeClaim
 metadata:
-  name: postgres-config
+  name: postgres-pvc
   namespace: pdfme
-data:
-  POSTGRES_INITDB_ARGS: "-E UTF8"
-  # Note: Mount your init-db-simplified.sql as a ConfigMap or use initdb scripts
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
 ---
+# Service to expose PostgreSQL
 apiVersion: v1
 kind: Service
 metadata:
-  name: postgres
+  name: postgres-service
   namespace: pdfme
 spec:
   type: ClusterIP
@@ -33,13 +39,13 @@ spec:
   selector:
     app: postgres
 ---
+# Deployment for PostgreSQL
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: postgres
   namespace: pdfme
 spec:
-  serviceName: postgres
   replicas: 1
   selector:
     matchLabels:
@@ -82,20 +88,12 @@ spec:
               name: postgres-secret
               key: password
         - name: POSTGRES_INITDB_ARGS
-          valueFrom:
-            configMapKeyRef:
-              name: postgres-config
-              key: POSTGRES_INITDB_ARGS
+          value: "-E UTF8"  # No ConfigMap needed - direct value!
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
         volumeMounts:
         - name: postgres-data
           mountPath: /var/lib/postgresql/data
-        # Uncomment below if you want to mount init SQL script
-        # - name: init-script
-        #   mountPath: /docker-entrypoint-initdb.d/01-init.sql
-        #   subPath: 01-init.sql
-        #   readOnly: true
         livenessProbe:
           exec:
             command:
@@ -124,25 +122,6 @@ spec:
             memory: "2Gi"
             cpu: "1000m"
       volumes:
-      # Uncomment below if you want to mount init SQL script
-      # - name: init-script
-      #   configMap:
-      #     name: postgres-init-script
-  volumeClaimTemplates:
-  - metadata:
-      name: postgres-data
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      resources:
-        requests:
-          storage: 20Gi
----
-# Uncomment and populate with your init SQL if needed
-# apiVersion: v1
-# kind: ConfigMap
-# metadata:
-#   name: postgres-init-script
-#   namespace: pdfme
-# data:
-#   01-init.sql: |
-#     -- Your init SQL here
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: postgres-pvc

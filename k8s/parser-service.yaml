@@ -20,7 +20,7 @@ metadata:
 data:
   RABBITMQ_HOST: "rabbitmq"
   RABBITMQ_PORT: "5672"
-  POSTGRES_HOST: "postgres"
+  POSTGRES_HOST: "postgres-service"
   POSTGRES_PORT: "5432"
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
