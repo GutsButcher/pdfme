@@ -34,6 +34,7 @@ func main() {
 
 	redisHost := getEnv("REDIS_HOST", "localhost")
 	redisPort := getEnv("REDIS_PORT", "6379")
+	redisPassword := getEnv("REDIS_PASSWORD", "")
 
 	log.Printf("Config:\n")
 	log.Printf("  RabbitMQ URL: %s\n", rabbitURL)
@@ -59,7 +60,7 @@ func main() {
 	log.Println("✓ PostgreSQL connected")
 
 	// Initialize Redis
-	redisCache, err := cache.NewRedisClient(redisHost, redisPort)
+	redisCache, err := cache.NewRedisClient(redisHost, redisPort, redisPassword)
 	if err != nil {
 		log.Fatalf("Failed to initialize Redis: %s", err)
 	}

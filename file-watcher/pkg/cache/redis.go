@@ -13,9 +13,10 @@ type RedisCache struct {
 }
 
 // NewRedisClient creates a new Redis client
-func NewRedisClient(host, port string) (*RedisCache, error) {
+func NewRedisClient(host, port, password string) (*RedisCache, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         fmt.Sprintf("%s:%s", host, port),
+		Password:     password,
 		DialTimeout:  5 * time.Second,
 		ReadTimeout:  30 * time.Second,  // Increased for large files (150MB+)
 		WriteTimeout: 30 * time.Second,  // Increased for large files (150MB+)

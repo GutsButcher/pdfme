@@ -62,15 +62,6 @@ spec:
         ports:
         - containerPort: 5432
           name: postgres
-        args:
-        - -c
-        - max_connections=400
-        - -c
-        - shared_buffers=512MB
-        - -c
-        - effective_cache_size=1536MB
-        - -c
-        - listen_addresses=*
         env:
         - name: POSTGRES_DB
           valueFrom:
@@ -87,8 +78,6 @@ spec:
             secretKeyRef:
               name: postgres-secret
               key: password
-        - name: POSTGRES_INITDB_ARGS
-          value: "-E UTF8"  # No ConfigMap needed - direct value!
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
         volumeMounts:

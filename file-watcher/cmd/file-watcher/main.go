@@ -41,6 +41,7 @@ func main() {
 
 	redisHost := getEnv("REDIS_HOST", "localhost")
 	redisPort := getEnv("REDIS_PORT", "6379")
+	redisPassword := getEnv("REDIS_PASSWORD", "")
 
 	interval, err := time.ParseDuration(pollInterval)
 	if err != nil {
@@ -74,7 +75,7 @@ func main() {
 	log.Println("✓ PostgreSQL connected")
 
 	// Initialize Redis
-	redisCache, err := cache.NewRedisClient(redisHost, redisPort)
+	redisCache, err := cache.NewRedisClient(redisHost, redisPort, redisPassword)
 	if err != nil {
 		log.Fatalf("Failed to initialize Redis: %s", err)
 	}
