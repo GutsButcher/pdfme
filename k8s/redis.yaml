@@ -5,14 +5,18 @@ metadata:
   name: redis-config
   namespace: pdfme
 data:
-  redis.conf: |
+  valkey.conf: |
+    # Maximum memory limit - Valkey will use up to 2GB of RAM
     maxmemory 2gb
+
+    # Eviction policy when maxmemory is reached - removes least recently used keys
     maxmemory-policy allkeys-lru
+
+    # Maximum size of a single request/response (256MB for large PDF blobs)
     proto-max-bulk-len 256mb
+
+    # Disable output buffer limits for normal clients (no memory limits on responses)
     client-output-buffer-limit normal 0 0 0
-    save 60 1000
-    appendonly yes
-    appendfsync everysec
 ---
 apiVersion: v1
 kind: Service
@@ -46,37 +50,35 @@ spec:
       hostname: redis
       containers:
       - name: redis
-        image: redis:7-alpine
+        image: valkey/valkey:7-alpine
         command:
-        - redis-server
-        - /etc/redis/redis.conf
+        - valkey-server
+        - /etc/valkey/valkey.conf
         ports:
         - containerPort: 6379
           name: redis
         volumeMounts:
-        - name: redis-data
-          mountPath: /data
         - name: redis-config
-          mountPath: /etc/redis
+          mountPath: /etc/valkey
           readOnly: true
         livenessProbe:
           exec:
             command:
-            - redis-cli
-            - ping
-          initialDelaySeconds: 30
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 5
-        readinessProbe:
-          exec:
-            command:
-            - redis-cli
+            - valkey-cli
             - ping
           initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 5
-          failureThreshold: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - valkey-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
         resources:
           requests:
             memory: "512Mi"
@@ -85,21 +87,6 @@ spec:
             memory: "2Gi"
             cpu: "500m"
       volumes:
-      - name: redis-data
-        persistentVolumeClaim:
-          claimName: redis-pvc
       - name: redis-config
         configMap:
           name: redis-config
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: redis-pvc
-  namespace: pdfme
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
